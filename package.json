@@ -1,0 +1,10 @@
+{
+  "name": "memoplex",
+  "version": "1.0.0",
+  "description": "Свіжі українські меми — прототип стрічки",
+  "private": true,
+  "scripts": {
+    "dev": "npx serve .",
+    "start": "npx serve ."
+  }
+}
