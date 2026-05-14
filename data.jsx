@@ -129,17 +129,28 @@ const MEMES = [
 // Обкладинка мема — м'яка ілюстративна композиція з кругами/арками + підпис.
 // Не дублюємо логотип і не намагаємося малювати реалістичні мем-образи.
 function MemeCover({ index, palette, height = 220, label, imageUrl }) {
-  // Якщо є реальна картинка з API — показуємо її
+  // Якщо є реальна картинка з API — показуємо її повністю (contain) на м'якому фоні
   if (imageUrl) {
+    const p = palette || COVER_PALETTES[(index || 0) % COVER_PALETTES.length];
     return (
       <div style={{
         width: '100%', height, position: 'relative', overflow: 'hidden',
-        background: '#1a1a1f',
+        background: p.bg,
       }}>
+        {/* Розмитий фон з тієї ж картинки — заповнює пусті місця при letterbox */}
+        <div style={{
+          position: 'absolute', inset: 0,
+          backgroundImage: `url(${imageUrl})`,
+          backgroundSize: 'cover', backgroundPosition: 'center',
+          filter: 'blur(28px) brightness(.85)',
+          transform: 'scale(1.2)',
+          opacity: 0.55,
+        }} />
         <img src={imageUrl} alt={label || ''} loading="lazy"
           onError={(e) => { e.currentTarget.style.display = 'none'; }}
           style={{
-            width: '100%', height: '100%', objectFit: 'cover',
+            position: 'relative',
+            width: '100%', height: '100%', objectFit: 'contain',
             display: 'block',
           }} />
       </div>

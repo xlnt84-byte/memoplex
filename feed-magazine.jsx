@@ -2,9 +2,104 @@
 // Щільність cozy, обкладинки великі, акцент на «свіжі».
 
 function FeedMagazine({ density = 'cozy', radius = 18, accent = '#0E5C55', memes }) {
-  const feed = useFeedState({ memes, pageSize: 7 });
+  // Чисті URL для розділів + категорій:
+  //   /             → стрічка, всі категорії
+  //   /top          → топ дня
+  //   /channels     → канали
+  //   /about        → про нас
+  //   /tvaryny etc. → стрічка, відфільтрована по категорії
+  const VIEWS = ['feed', 'top', 'channels', 'about', 'chat'];
+  const CATS = MEME_CATEGORIES.filter(c => c.id !== 'all').map(c => c.id);
+
+  const readPath = () => {
+    const p = (window.location.pathname || '/').replace(/\/+$/, '') || '/';
+    const slug = p === '/' ? '' : p.slice(1);
+    if (!slug) return { view: 'feed', cat: 'all' };
+    if (VIEWS.includes(slug)) return { view: slug, cat: 'all' };
+    if (CATS.includes(slug)) return { view: 'feed', cat: slug };
+    return { view: 'feed', cat: 'all' };
+  };
+
+  const initial = readPath();
+  const [view, setViewRaw] = useState(initial.view);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploads, setUploads] = useState(() => loadChatUploads());
+
+  const publishUpload = (meme) => {
+    setUploads(prev => {
+      const next = [meme, ...prev];
+      saveChatUploads(next);
+      return next;
+    });
+    setUploadOpen(false);
+    setView('chat');
+  };
+
+  const feed = useFeedState({
+    memes, pageSize: 7,
+    initialSort: initial.view === 'top' ? 'top' : 'fresh',
+    initialCat: initial.cat,
+  });
+
+  // Один писач URL-я з джерела істини (view + feed.cat)
+  const writeUrl = (v, c) => {
+    let target = '/';
+    if (v === 'feed') target = c === 'all' ? '/' : '/' + c;
+    else target = '/' + v;
+    if (window.location.pathname !== target) history.pushState(null, '', target);
+  };
+
+  const setView = (v) => {
+    setViewRaw(v);
+    if (v !== 'feed') {
+      feed.setCat('all');
+      writeUrl(v, 'all');
+    } else {
+      writeUrl('feed', feed.cat);
+    }
+  };
+
+  // Реагуємо на back/forward
+  useEffect(() => {
+    const onPop = () => {
+      const { view: v, cat: c } = readPath();
+      setViewRaw(v);
+      feed.setCat(c);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [feed]);
+
+  // Коли користувач перемикає категорію в FilterBar — оновити URL
+  useEffect(() => {
+    if (view === 'feed') writeUrl('feed', feed.cat);
+  }, [feed.cat, view]);
+
+  // Оновлюємо title сторінки під поточний розділ + категорію
+  useEffect(() => {
+    const titles = {
+      feed: 'Мемоплекс — нові українські меми',
+      top: 'Топ дня · Мемоплекс',
+      channels: 'Канали · Мемоплекс',
+      about: 'Про нас · Мемоплекс',
+      chat: 'Чат · Мемоплекс',
+    };
+    if (view === 'feed' && feed.cat !== 'all') {
+      const cat = MEME_CATEGORIES.find(c => c.id === feed.cat);
+      document.title = (cat ? cat.label : '') + ' · Мемоплекс';
+    } else {
+      document.title = titles[view] || titles.feed;
+    }
+  }, [view, feed.cat]);
+
   const sentinelRef = useRef(null);
   useInfiniteScroll(feed.loadMore, feed.hasMore, sentinelRef);
+
+  // "Топ дня" перемикає сортування при заході
+  useEffect(() => {
+    if (view === 'top') feed.setSort('top');
+    else if (view === 'feed') feed.setSort('fresh');
+  }, [view]);
 
   const openMeme = feed.openId ? (memes || MEMES).find(m => m.id === feed.openId) : null;
 
@@ -13,35 +108,44 @@ function FeedMagazine({ density = 'cozy', radius = 18, accent = '#0E5C55', memes
 
   return (
     <div style={{ background: '#FAFBF9', minHeight: '100%', fontFamily: 'Manrope, system-ui, sans-serif', color: '#0E0E12' }}>
-      <Header accent={accent} />
-      <FilterBar feed={feed} accent={accent} />
+      <Header accent={accent} view={view} setView={setView} onUpload={() => setUploadOpen(true)} />
 
-      <div style={{ maxWidth: 1180, margin: '0 auto', padding: '24px 28px 80px' }}>
-        {hero && (
-          <HeroCard meme={hero}
-            liked={feed.likes[hero.id]}
-            onLike={() => feed.toggleLike(hero.id)}
-            onOpen={() => feed.open(hero.id)}
-            onShare={() => feed.share(hero)}
-            radius={radius}
-          />
-        )}
+      {(view === 'feed' || view === 'top') && (
+        <>
+          <FilterBar feed={feed} accent={accent} />
+          <div style={{ maxWidth: 1180, margin: '0 auto', padding: '24px 28px 80px' }}>
+            {view === 'top' && <TopBanner accent={accent} />}
+            {hero && (
+              <HeroCard meme={hero}
+                liked={feed.likes[hero.id]}
+                onLike={() => feed.toggleLike(hero.id)}
+                onOpen={() => feed.open(hero.id)}
+                onShare={() => feed.share(hero)}
+                radius={radius}
+              />
+            )}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap, marginTop: gap }}>
+              {rest.map(m => (
+                <MagCard key={m.id} meme={m}
+                  liked={feed.likes[m.id]}
+                  onLike={() => feed.toggleLike(m.id)}
+                  onOpen={() => feed.open(m.id)}
+                  onShare={() => feed.share(m)}
+                  radius={radius}
+                  density={density}
+                />
+              ))}
+            </div>
+            <Sentinel ref={sentinelRef} hasMore={feed.hasMore} total={feed.total} />
+          </div>
+        </>
+      )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap, marginTop: gap }}>
-          {rest.map(m => (
-            <MagCard key={m.id} meme={m}
-              liked={feed.likes[m.id]}
-              onLike={() => feed.toggleLike(m.id)}
-              onOpen={() => feed.open(m.id)}
-              onShare={() => feed.share(m)}
-              radius={radius}
-              density={density}
-            />
-          ))}
-        </div>
-
-        <Sentinel ref={sentinelRef} hasMore={feed.hasMore} total={feed.total} />
-      </div>
+      {view === 'channels' && <ChannelsView memes={memes || MEMES} accent={accent} radius={radius}
+        onOpenAuthor={(author) => { feed.setQuery(author); setView('feed'); }} />}
+      {view === 'about' && <AboutView accent={accent} radius={radius} />}
+      {view === 'chat' && <ChatView uploads={uploads} accent={accent} radius={radius}
+        onOpenUpload={() => setUploadOpen(true)} />}
 
       {openMeme && (
         <MemeModal meme={openMeme} onClose={feed.close}
@@ -50,12 +154,152 @@ function FeedMagazine({ density = 'cozy', radius = 18, accent = '#0E5C55', memes
           onShare={() => feed.share(openMeme)}
         />
       )}
+      {uploadOpen && (
+        <UploadModal onClose={() => setUploadOpen(false)} onPublished={publishUpload} />
+      )}
       <Toast message={feed.toast} />
     </div>
   );
 }
 
-function Header({ accent }) {
+function TopBanner({ accent }) {
+  return (
+    <div style={{
+      marginBottom: 20, padding: '14px 20px', borderRadius: 14,
+      background: 'linear-gradient(135deg, #FF6F91 0%, #FFB199 100%)',
+      color: '#fff', display: 'flex', alignItems: 'center', gap: 12,
+      boxShadow: '0 6px 20px rgba(255,111,145,.25)',
+    }}>
+      <span style={{ fontSize: 22 }}>🔥</span>
+      <div>
+        <div style={{ fontWeight: 700, fontSize: 16 }}>Топ дня</div>
+        <div style={{ fontSize: 13, opacity: 0.9 }}>Меми з найбільшою кількістю реакцій за останні 24 години</div>
+      </div>
+    </div>
+  );
+}
+
+function ChannelsView({ memes, accent, radius, onOpenAuthor }) {
+  // Групуємо меми за автором/каналом, рахуємо стати.
+  const byAuthor = {};
+  memes.forEach(m => {
+    const key = m.author;
+    if (!byAuthor[key]) byAuthor[key] = { author: key, sub: m.sub, count: 0, likes: 0, cat: m.cat, sample: m };
+    byAuthor[key].count += 1;
+    byAuthor[key].likes += m.likes || 0;
+  });
+  const channels = Object.values(byAuthor).sort((a, b) => b.likes - a.likes);
+
+  return (
+    <div style={{ maxWidth: 1180, margin: '0 auto', padding: '32px 28px 80px' }}>
+      <div style={{ marginBottom: 24 }}>
+        <h1 style={{ fontSize: 32, fontWeight: 700, margin: 0, letterSpacing: -0.6 }}>Канали</h1>
+        <p style={{ fontSize: 15, color: 'rgba(14,14,18,.6)', margin: '4px 0 0' }}>
+          {channels.length} активних авторів · підписуйся, щоб бачити їхні меми в стрічці
+        </p>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14 }}>
+        {channels.map(ch => {
+          const cat = MEME_CATEGORIES.find(c => c.id === ch.cat);
+          const palette = COVER_PALETTES[(ch.author.length * 7) % COVER_PALETTES.length];
+          return (
+            <div key={ch.author} onClick={() => onOpenAuthor(ch.author)}
+              style={{
+                background: '#fff', border: '1px solid rgba(14,14,18,.06)',
+                borderRadius: radius, padding: 16, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 14,
+                transition: 'transform .15s, box-shadow .15s',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 6px 20px rgba(14,14,18,.08)'; }}
+              onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = ''; }}>
+              <div style={{
+                width: 48, height: 48, borderRadius: '50%', flexShrink: 0,
+                background: `linear-gradient(135deg, ${palette.shape1}, ${palette.shape2})`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: '#fff', fontWeight: 700, fontSize: 18,
+              }}>{ch.author[1] ? ch.author[1].toUpperCase() : '@'}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ch.author}</div>
+                <div style={{ fontSize: 12, color: 'rgba(14,14,18,.5)', marginTop: 2 }}>
+                  {ch.sub ? `r/${ch.sub} · ` : ''}{cat ? cat.label : ''}
+                </div>
+                <div style={{ fontSize: 11, color: 'rgba(14,14,18,.4)', marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
+                  {ch.count} мем{ch.count === 1 ? '' : ch.count < 5 ? 'и' : 'ів'} · {formatNum(ch.likes)} ❤
+                </div>
+              </div>
+              <button onClick={(e) => { e.stopPropagation(); }}
+                style={{
+                  border: `1px solid ${accent}`, background: 'transparent', color: accent,
+                  padding: '5px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600,
+                  cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0,
+                }}>+ Підписка</button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function AboutView({ accent, radius }) {
+  return (
+    <div style={{ maxWidth: 760, margin: '0 auto', padding: '48px 28px 80px' }}>
+      <h1 style={{ fontSize: 40, fontWeight: 700, margin: 0, letterSpacing: -0.8, textWrap: 'balance' }}>
+        Меми, які <span style={{ color: accent }}>хочеться</span> зберегти.
+      </h1>
+      <p style={{ fontSize: 18, color: 'rgba(14,14,18,.65)', lineHeight: 1.55, margin: '16px 0 32px' }}>
+        Мемоплекс агрегує свіжі картинки з відкритих джерел — Reddit-сабредитів про тварин, IT, спорт і Україну.
+        Без алгоритмічної сегрегації: одна стрічка, чотири категорії, три способи сортувати.
+      </p>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14, marginBottom: 36 }}>
+        <AboutStat num="5" label="джерел у стрічці" />
+        <AboutStat num="100+" label="свіжих мемів щодня" />
+        <AboutStat num="4" label="категорії" />
+        <AboutStat num="0₴" label="коштує користуватися" />
+      </div>
+
+      <div style={{ background: '#fff', border: '1px solid rgba(14,14,18,.06)', borderRadius: radius, padding: 24, marginBottom: 20 }}>
+        <h3 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 10px', color: accent }}>Як це працює</h3>
+        <ol style={{ margin: 0, paddingLeft: 22, color: 'rgba(14,14,18,.75)', fontSize: 15, lineHeight: 1.65 }}>
+          <li>При завантаженні сторінки тягнемо «hot» пости з 5 сабреддитів паралельно.</li>
+          <li>Фільтруємо NSFW, дедуплікуємо, чергуємо за категоріями.</li>
+          <li>Ти лайкаєш, шериш, дивишся — все відбувається в браузері без логіну.</li>
+          <li>«Поділитися» копіює оригінальне посилання на пост у джерелі.</li>
+        </ol>
+      </div>
+
+      <div style={{ background: '#FFF1EE', borderRadius: radius, padding: 24 }}>
+        <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 8px', color: '#7A1F38' }}>Що далі</h3>
+        <p style={{ fontSize: 14, color: '#7A1F38', lineHeight: 1.55, margin: 0, opacity: 0.85 }}>
+          Підключення Telegram-каналів через MTProto, форма «+ Додати мем», PWA з офлайн-режимом і push-сповіщеннями.
+        </p>
+      </div>
+
+      <div style={{ textAlign: 'center', marginTop: 40, fontSize: 13, color: 'rgba(14,14,18,.4)' }}>
+        Мемоплекс · v0.1 · MIT
+      </div>
+    </div>
+  );
+}
+
+function AboutStat({ num, label }) {
+  return (
+    <div style={{ background: '#fff', border: '1px solid rgba(14,14,18,.06)', borderRadius: 12, padding: 16 }}>
+      <div style={{ fontSize: 28, fontWeight: 700, color: '#0E5C55', letterSpacing: -0.5 }}>{num}</div>
+      <div style={{ fontSize: 12, color: 'rgba(14,14,18,.55)', marginTop: 2 }}>{label}</div>
+    </div>
+  );
+}
+
+function Header({ accent, view, setView, onUpload }) {
+  const NAV = [
+    { id: 'feed', label: 'Стрічка' },
+    { id: 'top', label: 'Топ дня' },
+    { id: 'channels', label: 'Канали' },
+    { id: 'chat', label: 'Чат' },
+    { id: 'about', label: 'Про нас' },
+  ];
   return (
     <header style={{
       borderBottom: '1px solid rgba(14,14,18,.06)',
@@ -64,20 +308,27 @@ function Header({ accent }) {
       display: 'flex', alignItems: 'center', gap: 16,
       position: 'sticky', top: 0, zIndex: 30,
     }}>
-      <Logo accent={accent} />
+      <div onClick={() => setView('feed')} style={{ cursor: 'pointer' }}>
+        <Logo accent={accent} />
+      </div>
       <nav style={{ display: 'flex', gap: 4, marginLeft: 12 }}>
-        {['Стрічка', 'Топ дня', 'Канали', 'Про нас'].map((l, i) => (
-          <a key={l} href="#" style={{
-            padding: '8px 12px', borderRadius: 8,
-            color: i === 0 ? accent : 'rgba(14,14,18,.55)',
-            fontWeight: i === 0 ? 600 : 500,
-            fontSize: 14, textDecoration: 'none',
-            background: i === 0 ? 'rgba(43,196,182,.12)' : 'transparent',
-          }}>{l}</a>
-        ))}
+        {NAV.map(n => {
+          const active = view === n.id;
+          return (
+            <button key={n.id} onClick={() => setView(n.id)} style={{
+              border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+              padding: '8px 12px', borderRadius: 8,
+              color: active ? accent : 'rgba(14,14,18,.55)',
+              fontWeight: active ? 600 : 500,
+              fontSize: 14,
+              background: active ? 'rgba(43,196,182,.12)' : 'transparent',
+              transition: 'background .12s, color .12s',
+            }}>{n.label}</button>
+          );
+        })}
       </nav>
       <div style={{ flex: 1 }} />
-      <button style={{
+      <button onClick={onUpload} style={{
         background: '#FF6F91', color: '#fff', border: 'none',
         padding: '9px 16px', borderRadius: 999, fontWeight: 600,
         fontFamily: 'inherit', fontSize: 14, cursor: 'pointer',

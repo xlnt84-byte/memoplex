@@ -1,6 +1,17 @@
 {
   "cleanUrls": true,
   "trailingSlash": false,
+  "rewrites": [
+    { "source": "/top", "destination": "/index.html" },
+    { "source": "/channels", "destination": "/index.html" },
+    { "source": "/about", "destination": "/index.html" },
+    { "source": "/feed", "destination": "/index.html" },
+    { "source": "/chat", "destination": "/index.html" },
+    { "source": "/tvaryny", "destination": "/index.html" },
+    { "source": "/it", "destination": "/index.html" },
+    { "source": "/sport", "destination": "/index.html" },
+    { "source": "/lokalni", "destination": "/index.html" }
+  ],
   "headers": [
     {
       "source": "/(.*).jsx",
